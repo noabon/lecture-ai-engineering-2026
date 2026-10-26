@@ -91,4 +91,31 @@ GitHub の自分の fork で、`lec01` → `main` の PR を作成します。**
 AIE_MODEL=gemini-3.5-flash uv run python -m app.ask "LoRAとは何ですか？"
 ```
 
-temperature を変えるには、`generate_content` の `config` 引数を調べてみましょう。
+temperature を変えるには、`--temperature` オプションを使います。
+
+```bash
+uv run python -m app.ask --temperature 0.2 "LoRAとは何ですか？"
+```
+
+値を変えて同じ質問を実行し、回答の違いを比べてみましょう。
+
+会話履歴を保って続けて質問するには、`--interactive` を指定します。質問を引数で渡すと最初の質問として送信し、省略すると入力待ちになります。会話を終えるには「終了」と入力してください。
+
+```bash
+uv run python -m app.ask --interactive
+uv run python -m app.ask --interactive "LoRAとは何ですか？"
+```
+
+応答時間とトークン数を比較するには、`--benchmark` と `--benchmark-model` / `--benchmark-question` を使います。比較する値はそれぞれ複数回指定できます。次の例は2モデル × 2質問の計4回のAPI呼び出しを、順番に行います。
+
+```bash
+uv run python -m app.ask --benchmark \
+  --benchmark-model gemini-3.5-flash-lite \
+  --benchmark-model gemini-3.5-flash \
+  --benchmark-question "LoRAとは何ですか？" \
+  --benchmark-question "RAGとは何ですか？"
+```
+
+片方だけを比較する場合も、モデルまたは質問を異なる値で2つ以上指定してください。応答時間はAPI呼び出し全体の経過時間で、ネットワークなどの待ち時間も含みます。実行回数が増えると無料枠のレート制限に達しやすくなるため、最初は少ない組み合わせで試してください。429エラーが出た場合はその時点で中断し、しばらく待ってから再実行します。
+
+結果を `answer.md` にまとめる際は、条件（モデル・質問）、応答時間、入力/出力トークン数、回答の違いに加えて、無料枠の1分あたり・1日あたりの上限と、実行回数が制限にどう影響したかを考察してください。
