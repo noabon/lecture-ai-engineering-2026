@@ -18,6 +18,7 @@ import json
 import re
 import time
 import unicodedata
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -188,7 +189,12 @@ def build_test_model() -> FunctionModel:
 
 
 # ---------------------------------------------------------------- 採点と集計
-def judge_cases(agent: Agent, cases: list[dict], wait: float = 0.0) -> dict[str, dict]:
+def judge_cases(
+    agent: Agent,
+    cases: list[dict],
+    wait: float = 0.0,
+    on_case: Callable[[dict[str, dict]], None] | None = None,
+) -> dict[str, dict]:
     """評価セットを 1 件ずつ採点する。戻り値は id → {基準: {reason, verdict}}。"""
     verdicts: dict[str, dict] = {}
     print(f"採点中 {len(cases)} 件 ", end="", flush=True)
@@ -200,6 +206,8 @@ def judge_cases(agent: Agent, cases: list[dict], wait: float = 0.0) -> dict[str,
             "reason": "末尾（最後の行）に「第N回」があるかをコードで判定",
             "verdict": check_lecture_mark(case["answer"]),
         }
+        if on_case is not None:
+            on_case(verdicts)
         print(".", end="", flush=True)
         if wait:
             time.sleep(wait)
@@ -281,6 +289,32 @@ def print_summary(summary: dict, labeler: str = "自分のラベル") -> None:
     print(f"\n不一致 {len(summary['mismatches'])} 件")
     for m in summary["mismatches"]:
         print(f"  #{m['id']} {_pad(m['name'], 12)} {m['kind']}（LLM={m['judge']} 自分={m['human']}）  理由: {m['reason']}")
+
+
+def write_judge_result(
+    path: Path,
+    model_name: str,
+    rubric_path: Path,
+    run_at: str,
+    verdicts: dict[str, dict],
+    total: int,
+    summary: dict | None = None,
+) -> None:
+    """途中結果または完了結果を、JSON ファイルへ安全に保存する。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    result = {
+        "model": model_name,
+        "rubric": str(_rel(rubric_path)),
+        "run_at": run_at,
+        "progress": {"completed": len(verdicts), "total": total},
+        "verdicts": verdicts,
+    }
+    if summary is not None:
+        result["summary"] = summary
+
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
 
 
 def compare_labels(a: dict[str, dict], b: dict[str, dict], name_a: str, name_b: str) -> None:
@@ -365,28 +399,28 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[model] {model_name}  temperature=0  rubric={_rel(args.rubric)}")
 
     judge = build_judge(model, rubric)
+    run_at = datetime.now().isoformat(timespec="seconds")
+
+    def save_progress(verdicts: dict[str, dict]) -> None:
+        write_judge_result(args.out, model_name, args.rubric, run_at, verdicts, len(cases))
+
+    save_progress({})
     try:
-        verdicts = judge_cases(judge, cases, wait=args.wait)
+        verdicts = judge_cases(judge, cases, wait=args.wait, on_case=save_progress)
     except ModelHTTPError as e:
         print("\n" + api_error_message(e.status_code, str(e.body)[:200]))
+        print(f"ここまでの結果は {_rel(args.out)} に保存しました")
         raise SystemExit(1)
     except UnexpectedModelBehavior as e:
         print(f"\n判定の形式が正しくありませんでした（LLM の出力が pass / fail / unsure の形になりませんでした）: {str(e)[:200]}")
         print("もう一度実行してください。続くときは、rubric.md に書き足した文に、出力の形式を変える指示が混ざっていないか見てください")
+        print(f"ここまでの結果は {_rel(args.out)} に保存しました")
         raise SystemExit(1)
 
     summary = summarize(cases, verdicts, labels)
     print_summary(summary)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(
-        json.dumps(
-            {"model": model_name, "rubric": str(_rel(args.rubric)), "run_at": datetime.now().isoformat(timespec="seconds"),
-             "verdicts": verdicts, "summary": summary},
-            ensure_ascii=False, indent=2,
-        ),
-        encoding="utf-8",
-    )
+    write_judge_result(args.out, model_name, args.rubric, run_at, verdicts, len(cases), summary)
     print(f"\n→ {_rel(args.out)} に保存しました")
 
 
