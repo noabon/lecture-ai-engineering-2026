@@ -4,6 +4,8 @@
 「採点 → 人のラベルとの比較 → 要確認・不一致の集計」が通ることを確かめる。
 """
 
+import json
+
 from app import judge
 from app.judge import (
     ALL_CRITERIA,
@@ -68,3 +70,23 @@ def test_judge_pipeline_with_fake_model():
     assert summary["coverage"]["covered"] + len({r["id"] for r in summary["review"]}) == 10
     for m in summary["mismatches"]:
         assert m["kind"] in ("見逃し", "過検出")
+
+
+def test_judge_result_is_saved_after_each_case(tmp_path):
+    cases = read_jsonl(DEFAULT_CASES)[:2]
+    output_path = tmp_path / "judge_result.json"
+    agent = build_judge(build_test_model(), DEFAULT_RUBRIC.read_text(encoding="utf-8"))
+    saved_counts = []
+
+    def save_progress(verdicts):
+        judge.write_judge_result(output_path, "test", DEFAULT_RUBRIC, "test-run", verdicts, len(cases))
+        saved = json.loads(output_path.read_text(encoding="utf-8"))
+        saved_counts.append(saved["progress"]["completed"])
+
+    verdicts = judge_cases(agent, cases, on_case=save_progress)
+
+    assert saved_counts == [1, 2]
+    saved = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved["progress"] == {"completed": 2, "total": 2}
+    assert set(saved["verdicts"]) == set(verdicts)
+    assert "summary" not in saved
