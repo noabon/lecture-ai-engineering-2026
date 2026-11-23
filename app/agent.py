@@ -21,7 +21,7 @@ from pathlib import Path
 from contextlib import nullcontext
 from time import perf_counter
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -78,8 +78,11 @@ FULL_CONTEXT_PROMPT = "<資料>\n{materials}\n</資料>\n\n質問: {question}"
 
 
 # モデルは実行時に渡す（テストではAPIを呼ばない TestModel に差し替えるため）
-agent = Agent(instructions=INSTRUCTIONS)
+agent = Agent(instructions=INSTRUCTIONS, output_type=[str, DeferredToolRequests])
 agent.tool_plain(tools.search_materials)
+agent.tool_plain(tools.search_glossary)
+agent.tool_plain(tools.get_lecture_summary)
+agent.tool_plain(tools.save_learning_log, requires_approval=True)
 
 # TODO(第3回 演習): tools.py に make_quiz を作り、ここで登録しよう
 
@@ -218,6 +221,19 @@ def main() -> None:
         except ModelHTTPError as e:
             print(api_error_message(e.status_code, str(e.body)[:200]))
             raise SystemExit(1)
+
+        if isinstance(result.output, DeferredToolRequests):
+            approvals = {}
+            for approval in result.output.approvals:
+                answer = input(f"{approval.tool_name} を保存しますか？ [y/N]: ").strip().lower()
+                approvals[approval.tool_call_id] = answer in {"y", "yes"}
+            result = target.run_sync(
+                args.question,
+                model=build_model(),
+                message_history=result.all_messages(),
+                deferred_tool_results=result.output.build_results(approvals=approvals),
+            )
+
         elapsed_seconds = perf_counter() - started
         print(result.output)
         if args.trace:

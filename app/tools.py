@@ -5,12 +5,14 @@
 """
 
 import json
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 
 from app.config import api_error_message
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+LEARNING_LOG_DIR = DATA_DIR.parent / "learning_log"
 MAX_RESULTS = 3
 
 
@@ -34,7 +36,7 @@ def search_glossary(query: str) -> str:
     """講座の用語集から用語を検索し、定義と、どの回で扱うかを返す。
 
     AIエンジニアリングの用語や、この講座（AIE2026）に固有の言葉について
-    答える前に使うこと。query には調べたい用語を1つだけ入れる（例: "LoRA"）。
+    答える前に使うこと。query には調べたい関連用語を複数まとめて入れてよい（例: "LoRA QLoRA"）。
     """
     q = _normalize(query)
     if not q:
@@ -126,3 +128,15 @@ def search_graph(query: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
     except APIError as e:
         return json.dumps({"error": api_error_message(e.code)}, ensure_ascii=False)
+
+
+def save_learning_log(topic: str, notes: str) -> str:
+    """学習した内容を learning_log/ に保存するときに使う。
+
+    利用者が保存してよいかを確認したあとに使う。保存対象はトピック名とメモの内容。
+    """
+    LEARNING_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    path = LEARNING_LOG_DIR / f"{timestamp}.md"
+    path.write_text(f"# {topic}\n\n{notes}\n", encoding="utf-8")
+    return f"学習記録を保存しました: {path.name}"
